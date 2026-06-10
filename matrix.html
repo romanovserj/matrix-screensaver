@@ -30,6 +30,7 @@ precision highp float;
 varying vec2 vUv;
 uniform float uT;
 uniform vec2 uRes;
+uniform float uDpr;
 uniform sampler2D uAtlas;
 
 float hash11(float p) {
@@ -87,9 +88,9 @@ void main() {
   float hueBase = uT / ${HUE_CYCLE_SEC.toFixed(1)};
 
   vec3 col = vec3(0.0);
-  col += layer(uv, 80.0, 0.040, 10.0, 3.0, hueBase) * 0.25;
-  col += layer(uv, 50.0, 0.070, 14.0, 2.0, hueBase) * 0.50;
-  col += layer(uv, 28.0, 0.130, 18.0, 1.0, hueBase) * 1.00;
+  col += layer(uv, uRes.x / (14.0 * uDpr), 0.040, 10.0, 3.0, hueBase) * 0.25;
+  col += layer(uv, uRes.x / (22.0 * uDpr), 0.070, 14.0, 2.0, hueBase) * 0.50;
+  col += layer(uv, uRes.x / (36.0 * uDpr), 0.130, 18.0, 1.0, hueBase) * 1.00;
 
   float vig = 1.0 - 0.45 * length(vUv - 0.5);
   col *= vig;
@@ -151,6 +152,7 @@ gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
 const uT = gl.getUniformLocation(prog, 'uT');
 const uRes = gl.getUniformLocation(prog, 'uRes');
+const uDpr = gl.getUniformLocation(prog, 'uDpr');
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -158,6 +160,7 @@ function resize() {
   canvas.height = window.innerHeight * dpr;
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.uniform2f(uRes, canvas.width, canvas.height);
+  gl.uniform1f(uDpr, dpr);
 }
 window.addEventListener('resize', resize);
 resize();
