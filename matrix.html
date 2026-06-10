@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Matrix</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="m"></canvas>
+<script>
+const CHARS = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ*+-<>:=';
+const HUE_CYCLE_SEC = 75;
+
+const canvas = document.getElementById('m');
+const gl = canvas.getContext('webgl', { antialias: false });
+
+const VSH = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main() {
+  vUv = aPos * 0.5 + 0.5;
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
+const FSH = `
+precision highp float;
+varying vec2 vUv;
+uniform float uT;
+uniform vec2 uRes;
+uniform sampler2D uAtlas;
+
+float hash11(float p) {
+  p = fract(p * 0.1031);
+  p *= p + 33.33;
+  p *= p + p;
+  return fract(p);
+}
+
+float hash21(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+vec3 hsv2rgb(vec3 c) {
+  vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+vec3 layer(vec2 uv, float cells, float speed, float trail, float seed, float hueBase) {
+  float rows = cells * uRes.y / uRes.x;
+  float col = floor(uv.x * cells);
+  float row = floor(uv.y * rows);
+
+  float colSeed = hash11(col * 7.13 + seed * 101.7);
+  float spd = speed * (0.5 + colSeed * 0.8);
+
+  float head = fract(uT * spd + colSeed * 19.7) * rows;
+  float d = mod(head - row, rows);
+  float bright = exp(-d * 4.0 / trail);
+
+  float flickRate = 1.5 + 2.5 * hash21(vec2(row, col) + seed);
+  float gRnd = hash21(vec2(col + seed * 13.0, row * 1.7) + floor(uT * flickRate));
+  float gi = floor(gRnd * 63.99);
+  vec2 g = vec2(mod(gi, 8.0), floor(gi / 8.0));
+
+  vec2 local = fract(vec2(uv.x * cells, uv.y * rows));
+  vec2 auv = (g + vec2(local.x, local.y)) / 8.0;
+  float glyph = texture2D(uAtlas, auv).r;
+  float glow = texture2D(uAtlas, auv, 3.0).r;
+
+  float hue = fract(hueBase + uv.x * 0.10 + seed * 0.04);
+  vec3 c = hsv2rgb(vec3(hue, 0.85, 1.0));
+
+  vec3 result = glyph * bright * c + glow * bright * c * 0.8;
+  float headF = smoothstep(1.6, 0.0, d);
+  result += (glyph + glow * 0.9) * headF * mix(c, vec3(1.0), 0.75);
+  return result;
+}
+
+void main() {
+  vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
+  float hueBase = uT / ${HUE_CYCLE_SEC.toFixed(1)};
+
+  vec3 col = vec3(0.0);
+  col += layer(uv, 80.0, 0.040, 10.0, 3.0, hueBase) * 0.25;
+  col += layer(uv, 50.0, 0.070, 14.0, 2.0, hueBase) * 0.50;
+  col += layer(uv, 28.0, 0.130, 18.0, 1.0, hueBase) * 1.00;
+
+  float vig = 1.0 - 0.45 * length(vUv - 0.5);
+  col *= vig;
+
+  col = col / (1.0 + col * 0.35);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+function makeAtlas() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 1024;
+  const x = c.getContext('2d');
+  x.fillStyle = '#000';
+  x.fillRect(0, 0, 1024, 1024);
+  x.fillStyle = '#fff';
+  x.font = "88px 'SF Mono', Menlo, monospace";
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  for (let i = 0; i < 64; i++) {
+    const ch = CHARS[i % CHARS.length];
+    const cx = (i % 8) * 128 + 64;
+    const cy = Math.floor(i / 8) * 128 + 64;
+    x.fillText(ch, cx, cy);
+  }
+  return c;
+}
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    throw new Error(gl.getShaderInfoLog(s));
+  }
+  return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, VSH));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FSH));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const tex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, tex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, gl.LUMINANCE, gl.UNSIGNED_BYTE, makeAtlas());
+gl.generateMipmap(gl.TEXTURE_2D);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+const uT = gl.getUniformLocation(prog, 'uT');
+const uRes = gl.getUniformLocation(prog, 'uRes');
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform2f(uRes, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+function loop(t) {
+  gl.uniform1f(uT, t / 1000);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
